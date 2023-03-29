@@ -1,0 +1,4 @@
+EVAL:
+  WEIGHTS: './cycleDetect/storage/logs/malena/FasterRCNN/resnet_50/327215325/weights_malena_FasterRCNN_best_loss.pth'
+  INPUT_SIZE: 300
+  EXAMPLES_TO_PLOT: 10

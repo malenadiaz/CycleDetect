@@ -1,0 +1,18 @@
+TRAIN:
+  BATCH_SIZE: 7
+  EPOCHS: 3
+  DATASET: 'malena'
+  INPUT_SIZE_IRR: [400,300]
+  NUM_CLASSES: 2
+  EVAL_INTERVAL: 1
+MODEL:
+  NAME: 'FasterRCNN'
+  BACKBONE: 'resnet_50'
+  LOSS_FUNC: ['IoU']
+AUG:
+  METHOD: 'cycleDetect'
+  PROB: 0.90
+SOLVER:
+  BASE_LR: 0.001
+  OPTIMIZER: 'SGD'
+  
