@@ -6,13 +6,15 @@ from PIL import Image
 from torch.utils.data import DataLoader
 from scipy.special import softmax
 from fvcore.common.config import CfgNode
-
+import pickle
 from engine.loops import validate
 from engine.checkpoints import load_trained_model
 from evaluation.ObjectDetectEvaluator import ObjectDetectEvaluator
+from evaluation.EchonetEvaluator import EchonetEvaluator
 from datasets import datas, load_dataset
 from utils.utils_files import to_numpy
 from config.defaults import cfg_costum_setup, default_argument_parser,overwrite_eval_cfg
+from utils.utils_stat import evaluate_51
 
 def sliding():
     mode = 'sliding_window'
@@ -42,13 +44,13 @@ def eval_trained_model(model: torch.nn.Module, cfg: CfgNode, ds: datas,
                                               pin_memory=True,collate_fn=collate_fn
                                               )
     # run test:
-    test_losses, test_outputs, test_inputs = validate(mode='test',
+    val_maps, test_outputs, test_inputs = validate(mode='test',
                                                       epoch=1,
                                                       loader=testloader,
                                                       model=model,
                                                       device=device,
                                                       criterion=None)
-    test_loss = test_losses["main"].avg
+    test_loss = val_maps["MAP@0.5.0.95"]
     dataset_info = cfg.EVAL.DATASET
     out_directory = os.path.join(basedir, "{}_eval_on_{}/".format(basename, dataset_info))
 
@@ -63,7 +65,7 @@ def eval_trained_model(model: torch.nn.Module, cfg: CfgNode, ds: datas,
     evaluator.process(test_inputs, test_outputs)
     evaluator.evaluate()
     evaluator.plot(num_examples_to_plot=min(num_examples_to_plot, len(test_outputs)))
-    print(" ** test loss: {}".format(test_loss))
+    print(" ** test MAP: {}".format(test_loss))
     # compute_stats(total_filenames, total_output_guiding, total_gt_guiding, textfilename=textfilename)
 
 def eval_sliding_window(model:torch.nn.Module, cfg: CfgNode, ds: datas, device: torch.device, basedir: str, basename: str,):
@@ -161,8 +163,8 @@ if __name__ == '__main__':
     basename = os.path.splitext(os.path.basename(cfg.EVAL.WEIGHTS))[0]
 
     if cfg.EVAL.MODE == 'normal':
-        ds = load_dataset(ds_name=cfg.EVAL.DATASET, input_transform=None, input_size=[400,300])
-        eval_trained_model(model=model, cfg=cfg, ds=ds,
+        ds = load_dataset(ds_name=cfg.EVAL.DATASET, input_transform=None, input_size=[300,600])
+        eval_trained_model(model=None, cfg=cfg, ds=ds,
                            basedir=basedir,
                            basename=basename,
                            device=device,
@@ -174,7 +176,7 @@ if __name__ == '__main__':
     elif cfg.EVAL.MODE == 'sliding_window':
         ds = load_dataset(ds_name="sliding_window", input_transform=None, input_size=cfg.EVAL.INPUT_SIZE, num_frames=cfg.NUM_FRAMES)
         #ds = load_dataset(ds_name="echonet_random", input_transform=None, input_size=train_params.input_size, num_frames=16)
-        eval_sliding_window(model=model,cfg=cfg, ds=ds, device=device,
+        eval_sliding_window(model=None,cfg=cfg, ds=ds, device=device,
                             basedir=basedir,
                             basename=basename,
                             )

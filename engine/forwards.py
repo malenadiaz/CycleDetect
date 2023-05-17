@@ -41,20 +41,23 @@ def objectDetect(model: torch.nn, data: List, criterion: torch.nn, device: torch
     
     pred_boxes = None
     loss = None
+    all_losses = {}
 
     if model.training:
         loss_dict = model(imgs, boxes)
         loss = sum(loss for loss in loss_dict.values())
+        all_losses = {'class_loss': loss_dict['loss_classifier'], 'bbox_loss': loss_dict['loss_box_reg'] 
+                        ,"object_loss":loss_dict['loss_objectness'], 'rpn_loss': loss_dict['loss_rpn_box_reg']}
     else:
         with torch.no_grad():
             pred_boxes = model(imgs, boxes)
-            m = MeanAveragePrecision()
-            m.update(pred_boxes, boxes)
-            loss = m.compute()['map']
-            loss = 1 - loss
+            # m = MeanAveragePrecision()
+            # m.update(pred_boxes, boxes)
+            # loss = m.compute()['map']
+            # loss = 1 - loss
         
     outputs = {"boxes_pred": pred_boxes, "boxes_gt": boxes, "imgs": imgs}
-    losses = {"loss": loss, "reported_loss": loss}
+    losses = {"loss": loss, "reported_loss": loss} | all_losses
 
     return losses, outputs
 

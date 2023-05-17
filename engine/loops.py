@@ -6,8 +6,9 @@ from typing import List, Dict, Optional, Union, Tuple
 
 from engine.forwards import run_forward
 from data.USKpts import USKpts
-from utils.utils_files import to_numpy, AverageMeter
-
+from utils.utils_files import AverageMeter
+from utils.coco_utils import get_coco_api_from_dataset
+from utils.coco_eval import CocoEvaluator
 ########################################################
 ########################################################
 # Run single epoch for Train/Validate/Eval
@@ -28,7 +29,9 @@ def train_vanilla(epoch: int,
     if prossesID is not None:
         prefix = "[{}]{}".format(prossesID, prefix)
 
-    losses = {"main": AverageMeter(), "ef": AverageMeter(), "kpts": AverageMeter(), "bxs":AverageMeter()}
+    losses = {"main": AverageMeter(), "bxs":AverageMeter(), 
+              "bbox_loss":AverageMeter(), "class_loss":AverageMeter(), "object_loss": AverageMeter(),
+               "rpn_loss": AverageMeter() }
 
     with tqdm(total=len(loader), ascii=True, desc=('{}: {:02d}'.format(prefix, epoch))) as pbar:
         for batch_i, data in enumerate(loader, 0):
@@ -53,7 +56,14 @@ def train_vanilla(epoch: int,
             losses["main"].update(batch_loss["reported_loss"], len(filenames))
             if "reported_loss" in batch_loss:
                 losses["bxs"].update(batch_loss["reported_loss"], len(filenames))
-
+            if "bbox_loss" in batch_loss:
+                losses["bbox_loss"].update(batch_loss["bbox_loss"], len(filenames))
+            if "class_loss" in batch_loss:
+                losses["class_loss"].update(batch_loss["class_loss"], len(filenames))
+            if "object_loss" in batch_loss:
+                losses["object_loss"].update(batch_loss["object_loss"], len(filenames))
+            if "rpn_loss" in batch_loss:
+                losses["rpn_loss"].update(batch_loss["rpn_loss"], len(filenames))
     return losses
 
 
@@ -75,8 +85,14 @@ def validate(mode: str,
     if prossesID is not None:
         prefix = "[{}]{}".format(prossesID, prefix)
 
+    cpu_device = torch.device("cpu")
+
     inputs, outputs = dict(), dict()
-    losses = {"main": AverageMeter(), "ef": AverageMeter(), "sd": AverageMeter(), "kpts": AverageMeter(), "bxs":AverageMeter()}
+    maps = { }
+
+    coco = get_coco_api_from_dataset(loader.dataset)
+    iou_types = ["bbox"]
+    coco_evaluator = CocoEvaluator(coco, iou_types)
 
     with tqdm(total=len(loader), ascii=True, desc=('{}: {:02d}'.format(prefix, epoch))) as pbar:
         for batch_i, data in enumerate(loader, 0):
@@ -88,39 +104,47 @@ def validate(mode: str,
             batch_loss, batch_output = run_forward(model, data, criterion, device)
 
             pbar.update()
+            
 
-            for dat_name, dat in batch_output.items():
-                if dat_name in ["boxes_pred","boxes_gt"]:
-                    numpy_dat = []
-                    for img in dat:
-                        img_data = {}
-                        for k,v in img.items():
-                            img_data[k] = to_numpy(v)
-                        numpy_dat.append(img_data)
-                else:
-                    numpy_dat = []
-                    for img in dat:
-                        numpy_dat.append(to_numpy(img))
-                batch_output[dat_name] = numpy_dat
+            boxes_pred = [{k: v.to(cpu_device) for k, v in t.items()} for t in batch_output["boxes_pred"]]
+            boxes_gt = [{k: v.to(cpu_device) for k, v in t.items()} for t in batch_output["boxes_gt"]]
+
+            res = {target["image_id"].item(): output for target, output in zip(data[1], boxes_pred)}
+            coco_evaluator.update(res)
+            # for dat_name, dat in batch_output.items():
+            #     if dat_name in ["boxes_pred","boxes_gt"]:
+            #         numpy_dat = []
+            #         for img in dat:
+            #             img_data = {}
+            #             for k,v in img.items():
+            #                 img_data[k] = to_numpy(v)
+            #             numpy_dat.append(img_data)
+            #     else:
+            #         numpy_dat = []
+            #         for img in dat:
+            #             numpy_dat.append(to_numpy(img))
+            #     batch_output[dat_name] = numpy_dat
             # accumulate losses:
-            losses["main"].update(batch_loss["reported_loss"], len(filenames))
-            if "reported_loss" in batch_loss:
-                losses["bxs"].update(batch_loss["reported_loss"], len(filenames))
+            # losses["main"].update(stats[0], len(filenames))
+            # if "reported_loss" in batch_loss:
+            #     losses["bxs"].update(batch_loss["reported_loss"], len(filenames))
 
             # accumulate outputs nad inputs:
             for ii, filename in enumerate(filenames):
-                inputs[filename] = {"keypoints": batch_output["kpts_gt"][ii] if "kpts_gt" in batch_output else None,
-                                    "ef": batch_output["ef_gt"][ii] if "ef_gt" in batch_output else None,
-                                    "sd": batch_output["sd_gt"][ii] if "sd_gt" in batch_output else None,
-                                    "bxs":batch_output["boxes_gt"][ii] if "boxes_gt" in batch_output else None
-                                    }
-                outputs[filename] = {"keypoints_prediction": batch_output["kpts_pred"][ii] if "kpts_pred" in batch_output else None,
-                                     "ef_prediction": batch_output["ef_pred"][ii] if "ef_pred" in batch_output else None,
-                                     "sd_prediction": batch_output["sd_pred"][ii] if "sd_pred" in batch_output else None,
-                                     "bxs_prediction": batch_output["boxes_pred"][ii] if "boxes_pred" in batch_output else None
-                                     }
+                inputs[filename] = boxes_gt[ii]
+                outputs[filename] = boxes_pred[ii]
 
-    return losses, outputs, inputs
+    coco_evaluator.synchronize_between_processes()
+    coco_evaluator.accumulate()
+    stats = coco_evaluator.summarize()
+    maps["MAP@0.5.0.95"] = stats[0]
+    maps["MAP@0.5"] = stats[1]
+    maps["MAP@0.75"] = stats[2]
+    maps["MAP@0.5.0.95.s"] = stats[3]
+    maps["MAP@0.5.0.95.m"] = stats[4]
+    maps["MAP@0.5.0.95.l"] = stats[5]
+
+    return maps, outputs, inputs
 
 ########################################
 ########################################

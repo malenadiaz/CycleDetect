@@ -23,17 +23,12 @@ class CycleDetection(data.Dataset):
 
         # get kpts annotations
         self.anno_dir = dataset_config["anno_folder"]
-        self.BOX_COORDS = self.load_box_annotations(self.img_list)
-
+        self.BOX_COORDS, self.LABELS = self.load_box_annotations(self.img_list)
         # basic transformations:
         self.basic_transform = torch_transforms.Compose([
             torch_transforms.ToTensor(),
             torch_transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]) # to 0-1 values
-        
-
-        # fig for item plots:
-        self.fig = plt.figure(figsize=(16, 10))
-    
+            
     def create_img_list(self, filenames_list: str) -> None:
         """
         Called during construction. Creates a list containing paths to frames in the dataset
@@ -46,11 +41,14 @@ class CycleDetection(data.Dataset):
     def load_box_annotations(self, img_list: List) -> np.ndarray:
         """ Creates an array of annotated keypoints coorinates for the frames in the dataset. """
         BOX_COORDS = []
+        LABELS = []
         if self.anno_dir is not None:
             for fname in img_list:
-                kpts = np.load(os.path.join(self.anno_dir, fname.replace("png", "npy")), allow_pickle=True)
-                BOX_COORDS.append(kpts)
-        return BOX_COORDS
+                annot_dir = np.load(os.path.join(self.anno_dir, fname.replace("png", "npy")), allow_pickle=True)
+                annot_dir = annot_dir.item()
+                BOX_COORDS.append(annot_dir['bbox'])
+                LABELS.append(annot_dir['label'])
+        return BOX_COORDS, LABELS
 
     def img_to_torch(self, img: np.ndarray) -> torch.Tensor:
         """ Convert original image format to torch.Tensor """
@@ -63,7 +61,7 @@ class CycleDetection(data.Dataset):
 
         return img
 
-    def get_img_and_kpts(self, index: int):
+    def get_img_and_bxs(self, index: int):
         """
         Load and parse a single data point.
         Args:
@@ -84,14 +82,22 @@ class CycleDetection(data.Dataset):
         boxes = self.BOX_COORDS[index].astype(int)
         #boxes = self.normalize_pose(pose=boxes, frame=img)
 
-        labels = [1] * len(boxes)
+        labels = [self.LABELS[index]] * len(boxes)
+        
+        boxes_length = len(boxes)
+        area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0]) if boxes_length > 0 else torch.as_tensor(boxes, dtype=torch.float32)
+        iscrowd = torch.zeros((boxes.shape[0],), dtype=torch.int64) if boxes_length > 0 else torch.as_tensor(boxes, dtype=torch.float32)
 
         data = {"img": img,
                 "boxes": boxes,
                 "img_path": img_path,
-                "labels": labels
+                "labels": labels,
+                "area":area,
+                "iscrowd":iscrowd, 
+                "image_id":index + 1
                 }
         return data
+
 
     def normalize_pose(self, pose: np.ndarray, frame: np.ndarray) -> np.ndarray:
         """ Normalizing a set of frame keypoint to [0, 1] """
@@ -117,7 +123,7 @@ class CycleDetection(data.Dataset):
         return len(self.img_list)
 
     def __getitem__(self, index):
-        data = self.get_img_and_kpts(index)
+        data = self.get_img_and_bxs(index)
 
         if self.transform is not None:
             transformed = self.transform(image=data["img"], bboxes=data["boxes"], labels = data["labels"])
@@ -128,23 +134,25 @@ class CycleDetection(data.Dataset):
             boxes = data["boxes"]
         
         #boxes = self.normalize_pose(pose=boxes, frame=img)
-        boxes = torch.tensor(boxes).float() #convert box annotations to tensors 
 
         # transform:
         img = Image.fromarray(np.uint8(img))
         img = self.basic_transform(img) #normalize to 0 1 values
 
         target = {}
+        #boxes
+        boxes = torch.tensor(boxes).float() #convert box annotations to tensors 
         target["boxes"] = boxes
         target["labels"] = torch.as_tensor(data["labels"],dtype=torch.int64 )
-        image_id = torch.tensor([index])
-        target["image_id"] = image_id
+        target["image_id"] = torch.tensor(data["image_id"])
+        target["area"] = torch.as_tensor(data["area"])
+        target["iscrowd"] = data["iscrowd"]
 
         return img, target, data["img_path"]
     
     def plot_item(self, index: int, do_augmentation: bool = True, print_folder: str = './visu/') -> None:
         """ Plot frame and gt annotations for a single data point """
-        data = self.get_img_and_kpts(index)
+        data = self.get_img_and_bxs(index)
         print_fname = "".join(data["img_path"].split("/")[-1].split(".")[:-1])
 
         # data aug:
@@ -164,3 +172,8 @@ class CycleDetection(data.Dataset):
         nnm = os.path.join(print_folder, print_fname)
         plt.savefig(nnm + ".png")
         print(nnm)
+
+    def get_labels(self):
+        return {0:"UMB", 1:"Ute Art.", 2:"Aor. Isth.",3: "Duct. Ven.", 
+                4: "L.Ventr In/Out", 5:"Umb Art.",
+                6:"Mid. Cere. Art." }                              

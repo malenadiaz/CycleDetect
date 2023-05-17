@@ -16,6 +16,8 @@ from engine.checkpoints import save_model
 from optimizers import load_optimizer
 import matplotlib.pyplot as plt
 import warnings
+from utils.coco_utils import get_coco_api_from_dataset
+
 warnings.filterwarnings("ignore", message=r"The frame.append", category=FutureWarning)
 
 logs_dir = CONST.STORAGE_DIR
@@ -50,7 +52,8 @@ def train(cfg):
 
 
     ds = load_dataset(ds_name=cfg.TRAIN.DATASET, input_transform=input_transform, input_size=cfg.TRAIN.INPUT_SIZE_IRR)
-    # data loaders:
+
+    #data loader
     trainloader, testloader, _ = sample_dataset(trainset=ds.trainset,
                                                 valset=ds.valset,
                                                 testset=None,
@@ -58,7 +61,7 @@ def train(cfg):
                                                 batch_size=cfg.TRAIN.BATCH_SIZE,
                                                 num_workers=cfg.DATA_LOADER.NUM_WORKERS)
 
-
+    
     model = load_model(cfg,is_gpu=is_gpu) # notice the default num of keypooints
     model.to(device)
     print('training model {}..'.format(model.__class__.__name__))
@@ -75,7 +78,7 @@ def train(cfg):
     writer = SummaryWriter(log_dir=log_folder)
     
         # ----- Setup logger -----:
-    best_val_loss = np.inf
+    best_val_MAP = 0
     best_val_metric = {"kpts": np.inf, "ef": np.inf, "sd": np.inf, "bxs":np.inf}
     evaluator = ObjectDetectEvaluator(dataset=ds.valset, output_dir=None, verbose=False)
     
@@ -98,49 +101,55 @@ def train(cfg):
                                        optimizer = optimizer)
             train_loss = train_losses["main"].avg
             writer.add_scalar('Loss/Train', train_loss, epoch)
+            writer.add_scalar('BBoxLoss/Train', train_losses["bbox_loss"].avg, epoch)
+            writer.add_scalar('ClassLoss/Train', train_losses["class_loss"].avg, epoch)
+            writer.add_scalar('RPNLoss/Train', train_losses["rpn_loss"].avg, epoch)
+            writer.add_scalar('ObjectLoss/Train', train_losses["object_loss"].avg, epoch)
+
             #print(torch.cuda.memory_stats(device=device))
 
-                       # eval:
+            # eval:
             if epoch % cfg.TRAIN.EVAL_INTERVAL == 0:
-                val_losses, val_outputs, val_inputs = validate(mode='validation',
+                val_maps, val_outputs, val_inputs = validate(mode='validation',
                                                                epoch=epoch,
                                                                loader=testloader,
                                                                model=model,
                                                                device=device,
                                                                criterion=criterion)
-                val_loss = val_losses["main"].avg
-                writer.add_scalar('Loss/Validation', val_loss, epoch)
-                for task in ['ef', 'sd', 'kpts', 'bxs']:
-                    if task in val_losses:
-                        writer.add_scalar("Loss/{}_Validation".format(task), val_losses[task].avg, epoch)
-
+                #val_loss = val_losses["main"].avg
+                writer.add_scalar('MAP@0.5.0.95/Val', val_maps["MAP@0.5.0.95"], epoch)
+                writer.add_scalar('MAP@0.5/Val', val_maps["MAP@0.5"], epoch)
+                writer.add_scalar('MAP@0.75/Val', val_maps["MAP@0.75"], epoch)
+                writer.add_scalar("MAP@0.5.0.95.s", val_maps["MAP@0.5.0.95.s"], epoch)
+                writer.add_scalar("MAP@0.5.0.95.m", val_maps["MAP@0.5.0.95.m"], epoch)
+                writer.add_scalar("MAP@0.5.0.95.l", val_maps["MAP@0.5.0.95.l"], epoch)
 
                 evaluator.process(val_inputs, val_outputs)
                 eval_metrics = evaluator.evaluate()
-                for task in ['ef', 'sd', 'kpts', 'bxs']:
-                    if task in evaluator.get_tasks():
-                        writer.add_scalar("Val/{}ERR".format(task, task), eval_metrics[task], epoch)
+                # for task in ['ef', 'sd', 'kpts', 'bxs']:
+                #     if task in evaluator.get_tasks():
+                #         writer.add_scalar("Val/{}ERR".format(task, task), eval_metrics[task], epoch)
 
-                if val_loss < best_val_loss:
-                    filename = os.path.join(log_folder, 'weights_{}_best_loss.pth'.format(basename))
-                    best_val_loss = val_loss
-                    save_model(filename, epoch, model, cfg, train_loss, val_loss, best_val_metric, hostname)
-                    print("Saved at loss {:.5f}\n".format(val_loss))
-                    writer.add_scalar('BestVal/Loss', best_val_loss, epoch)
+                if val_maps["MAP@0.5.0.95"] > best_val_MAP:
+                    filename = os.path.join(log_folder, 'weights_{}_best_map.pth'.format(basename))
+                    best_val_MAP = val_maps["MAP@0.5.0.95"]
+                    save_model(filename, epoch, model, cfg, train_loss, best_val_MAP, best_val_metric, hostname)
+                    print("Saved at MAP {:.5f}\n".format(best_val_MAP))
+                    writer.add_scalar('BestVal/MAP', best_val_MAP, epoch)
 
-                # Update best val metric:
-                for task in ['ef', 'sd', 'kpts', 'bxs']:
-                    if task in eval_metrics and eval_metrics[task] < best_val_metric[task]:
-                        filename = os.path.join(log_folder, 'weights_{}_best_{}Err.pth'.format(basename, task))
-                        best_val_metric[task] = eval_metrics[task]
-                        writer.add_scalar("BestVal/{}Err".format(task), best_val_metric[task], epoch)
-                        if task in ['ef', 'kpts', 'bxs']:
-                            save_model(filename, epoch, model, cfg, train_loss, val_loss, best_val_metric, hostname)
-                            print("Saved at val loss {:.5f}, {} error {:.5f}%\n".format(val_loss, task, eval_metrics[task]))
+                # # Update best val metric:
+                # for task in ['ef', 'sd', 'kpts', 'bxs']:
+                #     if task in eval_metrics and eval_metrics[task] < best_val_metric[task]:
+                #         filename = os.path.join(log_folder, 'weights_{}_best_{}Err.pth'.format(basename, task))
+                #         best_val_metric[task] = eval_metrics[task]
+                #         writer.add_scalar("BestVal/{}Err".format(task), best_val_metric[task], epoch)
+                #         if task in ['ef', 'kpts', 'bxs']:
+                #             save_model(filename, epoch, model, cfg, train_loss, val_loss, best_val_metric, hostname)
+                #             print("Saved at val loss {:.5f}, {} error {:.5f}%\n".format(val_loss, task, eval_metrics[task]))
         # Save & Close:
     print('Finished Training')
     filename = os.path.join(log_folder, 'weights_{}_ep_{}.pth'.format(basename, epoch))
-    save_model(filename, epoch, model, cfg, train_loss, val_loss, best_val_metric, hostname)
+    save_model(filename, epoch, model, cfg, train_loss, val_maps["MAP@0.5.0.95"], best_val_MAP, hostname)
     writer.close()  # close tensorboard
     return train_loss
 

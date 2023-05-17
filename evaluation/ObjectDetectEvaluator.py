@@ -14,8 +14,9 @@ import cv2
 from utils.plot import plot_boxes_self_preds
 import numpy as np
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
-from mean_average_precision import MetricBuilder
-
+from utils.utils_files import to_numpy
+#51 eval https://docs.voxel51.com/user_guide/evaluation.html#evaluating-models
+from utils.utils_stat import evaluate_51
 SMOOTH = 1e-6
 
 
@@ -67,21 +68,34 @@ class ObjectDetectEvaluator(DatasetEvaluator):
         if self._verbose:
             self._logger.info("Eval stats for boxes")
         
-        metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=True, num_classes=1)
+        preds = []
+        targets = []
+        # metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=True, num_classes=1)
+
+        if self.__output_dir:
+            preds_numpy = {t.split('/')[-1]:{k: to_numpy(v) for k, v in predictions[t]["pred"].items()} for t in predictions}
+            evaluate_51(self._dataset, preds_numpy,self._output_dir)
 
         for prediction in predictions.values():
-            gt,preds = self.convert_metric(prediction)
-            metric_fn.add(preds, gt)
-
+            targets.append(prediction["gt"])
+            preds.append(prediction["pred"])
+            # gt,preds = self.convert_metric(prediction)
+            # metric_fn.add(preds, gt)
+            
             # m.update(torch.Tensor([prediction["bxs_prediction"]]), torch.Tensor([prediction["bxs"]]))
             # pred = prediction["bxs_prediction"], prediction["boxes"]
             # /iou = self.iou_numpy(prediction["bxs_prediction"]['boxes'], prediction["bxs"]['boxes'])
             # dist_pred_gt_kpts.append(100 * match_two_kpts_set(prediction["keypoints"].reshape(num_kpts * num_annotated_frames, 2),
-            #                                                   prediction["keypoints_prediction"].reshape(num_kpts * num_annotated_frames, 2)))
+            #      
+            # 
 
-        map = metric_fn.value(iou_thresholds=0.1)['mAP']        
+        metric = MeanAveragePrecision(class_metrics=True)
+        metric.update(preds, targets)
+        stats = metric.compute()
+        print(stats)
+        map = stats['map'].int()     
         if self._verbose:
-            self._logger.info("Mean keypoints error is {}".format(map))
+            self._logger.info("MAP @ error is {}".format(map))
         return map
     
 
@@ -120,7 +134,7 @@ class ObjectDetectEvaluator(DatasetEvaluator):
         """
         some_val_output_item = next(iter(outputs.items()))[1]
         tasks = []
-        if some_val_output_item["bxs_prediction"] is not None:
+        if "boxes" in some_val_output_item:
             tasks.append("bxs") 
         self._tasks = tasks
 
@@ -128,9 +142,9 @@ class ObjectDetectEvaluator(DatasetEvaluator):
         for ii, data_path in enumerate(outputs):
             prediction = dict()
 
-            if some_val_output_item["bxs_prediction"] is not None:
-                prediction["bxs_prediction"] = outputs[data_path]["bxs_prediction"]
-                prediction["bxs"] = inputs[data_path]["bxs"]
+            if "bxs" in tasks:
+                prediction["gt"] = inputs[data_path]
+                prediction["pred"] = outputs[data_path]
 
             # get case name:
             prediction["data_path_from_root"] = data_path.replace(self._dataset.img_folder, "")
@@ -154,8 +168,15 @@ class ObjectDetectEvaluator(DatasetEvaluator):
             if not os.path.exists(self._output_dir):
                 os.makedirs(self._output_dir)
             file_path = os.path.join(self._output_dir, "objectDetect_predictions.pkl")
+
+            numpy_preds = {}
+            for data_path in predictions:
+                boxes_gt = {k: to_numpy(v) for k, v in predictions[data_path]["gt"].items()}
+                boxes_pred = {k: to_numpy(v) for k, v in predictions[data_path]["pred"].items()}
+                numpy_preds[data_path] = {"data_path_from_root": data_path, "gt":boxes_gt, "pred":boxes_pred}
             with open(file_path, 'wb') as handle:
-                pickle.dump(predictions, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+                pickle.dump(numpy_preds, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         if not self._do_evaluation and self._verbose:
             self._logger.info("Annotations are not available for evaluation.")
@@ -186,25 +207,29 @@ class ObjectDetectEvaluator(DatasetEvaluator):
         for data_path in random.sample(list(self._predictions), num_examples_to_plot):
             prediction = self._predictions[data_path]
             fig.clf()
-            fig = self._plot_boxes_prediction(fig, prediction["data_path_from_root"],prediction["bxs_prediction"] )
+            fig = self._plot_boxes_prediction(fig, prediction["data_path_from_root"],prediction["pred"])
             plot_filename = "{}.jpg".format(os.path.splitext(prediction["data_path_from_root"])[0].replace("/", "_"))
             fig.savefig(fname=os.path.join(plot_directory, plot_filename))
 
     def _plot_boxes_prediction(self,fig, data_path_from_root,boxes_prediction):
         datapoint_index = self._dataset.img_list.index(data_path_from_root)
-        data = self._dataset.get_img_and_kpts(datapoint_index)
+        data = self._dataset.get_img_and_bxs(datapoint_index)
         img = data["img"]
         boxes = data["boxes"]
+        labels = data["labels"]
         # normalize:
+        boxes_prediction = {k: to_numpy(v) for k, v in boxes_prediction.items()}
         boxes = self._dataset.normalize_pose(boxes, img)
-        selected_boxes = np.argwhere(boxes_prediction['scores']>0.45).flatten()
+        selected_boxes = np.argwhere(boxes_prediction['scores']>0.45).flatten() #confidence threshold of 0.45
         boxes_pred = boxes_prediction['boxes'][selected_boxes, :]
         boxes_pred = self._dataset.normalize_pose(boxes_pred, img)
-        img = cv2.resize(img, dsize=(400, 300), interpolation=cv2.INTER_AREA)
+       
+        img = cv2.resize(img, dsize=(600, 300), interpolation=cv2.INTER_AREA)
 
         boxes_pred = self._dataset.denormalize_pose(boxes_pred, img)
         boxes = self._dataset.denormalize_pose(boxes, img)
 
-        plot_boxes_self_preds(fig, img, gt_boxes=boxes, pred_boxes=boxes_pred)
+        plot_boxes_self_preds(fig, img, gt_boxes=boxes, pred_boxes=boxes_pred, scores=boxes_prediction['scores'][selected_boxes]
+                              , gt_labels = labels, pred_labels=boxes_prediction['labels'][selected_boxes], label_map = self._dataset.get_labels() )
 
         return fig

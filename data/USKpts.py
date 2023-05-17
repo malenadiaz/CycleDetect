@@ -55,7 +55,7 @@ class USKpts(data.Dataset):
             torch_transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
         # fig for item plots:
-        self.fig = plt.figure(figsize=(16, 10))
+       # self.fig = plt.figure(figsize=(16, 10))
 
     def create_img_list(self, filenames_list: str) -> None:
         """
