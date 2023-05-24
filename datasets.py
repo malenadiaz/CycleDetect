@@ -39,9 +39,9 @@ def load_dataset(ds_name: str, input_transform: A.core.composition.Compose = Non
     loader_func = CycleDetection
     img_dirname = os.path.join(data_folder, "frames/")
     anno_dirname = os.path.join(data_folder, "annotations/")
-    train_filenames_list = os.path.join(data_folder, 'filenames/train_filenames.txt')
-    val_filenames_list = os.path.join(data_folder, 'filenames/val_filenames.txt')
-    test_filenames_list = os.path.join(data_folder, 'filenames/test_filenames.txt')
+    train_filenames_list = os.path.join(data_folder, 'filenames/doppler_train_filenames.txt')
+    val_filenames_list = os.path.join(data_folder, 'filenames/doppler_val_filenames.txt')
+    test_filenames_list = os.path.join(data_folder, 'filenames/doppler_test_filenames.txt')
 
 
     dataset_config = {"img_folder": img_dirname, "anno_folder": anno_dirname, "transform": input_transform, "input_size": input_size}

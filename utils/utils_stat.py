@@ -12,8 +12,8 @@ def convert_to_fityone(ds):
     label_map = ds.get_labels()
     for img_idx in range(len(ds)):
         data = ds.get_img_and_bxs(img_idx)
-
-        sample = fo.Sample(filepath=os.path.join(os.getcwd(), ds.img_folder, ds.img_list[img_idx]))
+        f = os.path.join(os.getcwd(), ds.img_folder, ds.img_list[img_idx])
+        sample = fo.Sample(filepath=f)
        
         img = data['img']
         w = img.shape[1]
@@ -26,12 +26,13 @@ def convert_to_fityone(ds):
         for i in range(num_objs):
             label = labels[i]
             bbox = bboxes[i]
-            bounding_box = [bbox[2] /w , bbox[3]/h, (bbox[2] - bbox[0])/w, (bbox[3]- bbox[1])/h]
+            bounding_box = [bbox[0] /w , bbox[1]/h, (bbox[2] - bbox[0])/w, (bbox[3]- bbox[1])/h]
             detections.append(
             fo.Detection(label=label_map[label], bounding_box=bounding_box)
             )
         sample["ground_truth"] = fo.Detections(detections=detections)
         samples.append(sample)
+    print(len(samples))
     # Create dataset
     dataset = fo.Dataset()
     dataset.add_samples(samples)
@@ -57,41 +58,49 @@ def convert_torch_predictions(preds, det_id, s_id, w, h, classes):
         
     return detections, det_id
 
-def add_detections( dataset, view, pred, img_path):
+def add_detections( dataset, view, pred, img_path, count = 0):
     # Run inference on a dataset and add results to FiftyOne
     classes = list(dataset.get_labels().values())
     det_id = 0
 
 
     img_path = os.path.join(os.getcwd(), img_path)
-    img_path = re.sub(r"(/[^/]+?)/\.\./", "/", img_path)
+    img_path_prev = ""
+    while img_path_prev != img_path:
+        img_path_prev = img_path
+        img_path = re.sub(r"(/[^/]+?)/\.\./", "/", img_path)
     sample = view[img_path]
     s_id = sample.id
     w = 600
     h = 300
     detections, det_id = convert_torch_predictions(
-            pred["pred"],
+            pred,
             det_id, 
             s_id, 
             w, 
             h, 
-            classes,
+            dataset.get_labels(),
         )
                     
     sample["predictions"] = detections
+    if count == 0:
+        print(sample["ground_truth"], sample["predictions"])
     sample.save()
 
 def evaluate_51(ds, preds,output_dir):
     print(ds.img_folder)
     fo_dataset = convert_to_fityone(ds)
-
+    c = 0
     for pred in preds:
-        add_detections(ds, fo_dataset, preds[pred], pred)
+        filename = pred.split('/')[-1]
+        add_detections(ds, fo_dataset, preds[pred], os.path.join(ds.img_folder, filename), c)
+        c += 1
     results = fue.evaluate_detections(
     fo_dataset, 
     "predictions", 
     classes=list(ds.get_labels().values()), 
     eval_key="eval", 
+    classwise=False,
     compute_mAP=True
     )
     plot = results.plot_confusion_matrix(backend='matplotlib')

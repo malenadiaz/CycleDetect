@@ -174,6 +174,6 @@ class CycleDetection(data.Dataset):
         print(nnm)
 
     def get_labels(self):
-        return {0:"UMB", 1:"Ute Art.", 2:"Aor. Isth.",3: "Duct. Ven.", 
-                4: "L.Ventr In/Out", 5:"Umb Art.",
+        return {1:"Ute Art.", 2:"Aor. Isth.",3: "Duct. Ven.", 
+                4:"L.Ventr In/Out", 5:"Umb Art.",
                 6:"Mid. Cere. Art." }                              

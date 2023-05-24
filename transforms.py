@@ -12,11 +12,9 @@ class HorizontalFlipKeepIndexOrder(A.HorizontalFlip):
 def load_transform() ->  A.core.composition.Compose:
 
     input_transformer =  A.Compose([
+        A.RandomBrightnessContrast(brightness_limit=1, contrast_limit=1),
         A.Flip(0.5),
         # A.RandomRotate90(0.5),
-        A.MotionBlur(p=0.2),
-        A.MedianBlur(blur_limit=3, p=0.1),
-        A.Blur(blur_limit=3, p=0.1),
     ], bbox_params={
         'format': 'pascal_voc',
         'label_fields': ['labels']

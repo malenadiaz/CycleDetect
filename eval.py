@@ -164,7 +164,7 @@ if __name__ == '__main__':
 
     if cfg.EVAL.MODE == 'normal':
         ds = load_dataset(ds_name=cfg.EVAL.DATASET, input_transform=None, input_size=[300,600])
-        eval_trained_model(model=None, cfg=cfg, ds=ds,
+        eval_trained_model(model=model, cfg=cfg, ds=ds,
                            basedir=basedir,
                            basename=basename,
                            device=device,

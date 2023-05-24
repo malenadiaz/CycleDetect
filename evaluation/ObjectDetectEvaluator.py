@@ -17,6 +17,7 @@ from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from utils.utils_files import to_numpy
 #51 eval https://docs.voxel51.com/user_guide/evaluation.html#evaluating-models
 from utils.utils_stat import evaluate_51
+from torchvision.ops import nms
 SMOOTH = 1e-6
 
 
@@ -25,7 +26,7 @@ class ObjectDetectEvaluator(DatasetEvaluator):
         self,
         dataset: datas,
         tasks: List = ["bxs"],
-        output_dir: str = "./visu",
+        output_dir: str = None,
         verbose: bool = True
     ):
         """
@@ -72,13 +73,14 @@ class ObjectDetectEvaluator(DatasetEvaluator):
         targets = []
         # metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=True, num_classes=1)
 
-        if self.__output_dir:
+        if self._output_dir:
             preds_numpy = {t.split('/')[-1]:{k: to_numpy(v) for k, v in predictions[t]["pred"].items()} for t in predictions}
             evaluate_51(self._dataset, preds_numpy,self._output_dir)
 
         for prediction in predictions.values():
             targets.append(prediction["gt"])
-            preds.append(prediction["pred"])
+            preds.append(prediction['pred'])
+
             # gt,preds = self.convert_metric(prediction)
             # metric_fn.add(preds, gt)
             
@@ -93,7 +95,7 @@ class ObjectDetectEvaluator(DatasetEvaluator):
         metric.update(preds, targets)
         stats = metric.compute()
         print(stats)
-        map = stats['map'].int()     
+        map = stats['map'].float()     
         if self._verbose:
             self._logger.info("MAP @ error is {}".format(map))
         return map
@@ -144,7 +146,10 @@ class ObjectDetectEvaluator(DatasetEvaluator):
 
             if "bxs" in tasks:
                 prediction["gt"] = inputs[data_path]
-                prediction["pred"] = outputs[data_path]
+                pred = outputs[data_path]
+                pred_pos = nms(pred['boxes'], pred['scores'], iou_threshold=0.8)
+                pred = {k:v[pred_pos] for k,v in pred.items()}
+                prediction["pred"] = pred
 
             # get case name:
             prediction["data_path_from_root"] = data_path.replace(self._dataset.img_folder, "")
@@ -233,3 +238,4 @@ class ObjectDetectEvaluator(DatasetEvaluator):
                               , gt_labels = labels, pred_labels=boxes_prediction['labels'][selected_boxes], label_map = self._dataset.get_labels() )
 
         return fig
+

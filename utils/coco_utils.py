@@ -9,6 +9,7 @@ import torchvision
 # import transforms as T
 from pycocotools import mask as coco_mask
 from pycocotools.coco import COCO
+from utils.coco_eval import convert_to_xywh
 
 def convert_to_coco_api(ds):
     coco_ds = COCO()
@@ -39,7 +40,7 @@ def convert_to_coco_api(ds):
         for i in range(num_objs):
             ann = {}
             ann["image_id"] = image_id
-            ann["bbox"] = [bboxes[i][0], bboxes[i][1], bboxes[i][2] - bboxes[i][0], bboxes[i][3]- bboxes[i][1]]
+            ann["bbox"] = convert_to_xywh(bboxes[i]).tolist()
             ann["category_id"] = labels[i]
             categories.add(labels[i])
             ann["area"] = areas[i]

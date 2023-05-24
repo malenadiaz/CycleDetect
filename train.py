@@ -63,6 +63,7 @@ def train(cfg):
 
     
     model = load_model(cfg,is_gpu=is_gpu) # notice the default num of keypooints
+
     model.to(device)
     print('training model {}..'.format(model.__class__.__name__))
 
@@ -100,11 +101,11 @@ def train(cfg):
                                        device=device, 
                                        optimizer = optimizer)
             train_loss = train_losses["main"].avg
-            writer.add_scalar('Loss/Train', train_loss, epoch)
-            writer.add_scalar('BBoxLoss/Train', train_losses["bbox_loss"].avg, epoch)
-            writer.add_scalar('ClassLoss/Train', train_losses["class_loss"].avg, epoch)
-            writer.add_scalar('RPNLoss/Train', train_losses["rpn_loss"].avg, epoch)
-            writer.add_scalar('ObjectLoss/Train', train_losses["object_loss"].avg, epoch)
+            writer.add_scalar('TrainLoss/Loss', train_loss, epoch)
+            writer.add_scalar('TrainLoss/BBox', train_losses["bbox_loss"].avg, epoch)
+            writer.add_scalar('TrainLoss/Class', train_losses["class_loss"].avg, epoch)
+            writer.add_scalar('TrainLoss/RPN', train_losses["rpn_loss"].avg, epoch)
+            writer.add_scalar('TrainLoss/Object', train_losses["object_loss"].avg, epoch)
 
             #print(torch.cuda.memory_stats(device=device))
 
@@ -117,15 +118,16 @@ def train(cfg):
                                                                device=device,
                                                                criterion=criterion)
                 #val_loss = val_losses["main"].avg
-                writer.add_scalar('MAP@0.5.0.95/Val', val_maps["MAP@0.5.0.95"], epoch)
-                writer.add_scalar('MAP@0.5/Val', val_maps["MAP@0.5"], epoch)
-                writer.add_scalar('MAP@0.75/Val', val_maps["MAP@0.75"], epoch)
-                writer.add_scalar("MAP@0.5.0.95.s", val_maps["MAP@0.5.0.95.s"], epoch)
-                writer.add_scalar("MAP@0.5.0.95.m", val_maps["MAP@0.5.0.95.m"], epoch)
-                writer.add_scalar("MAP@0.5.0.95.l", val_maps["MAP@0.5.0.95.l"], epoch)
+                writer.add_scalar('MAPVal/@0.5.0.95', val_maps["MAP@0.5.0.95"], epoch)
+                writer.add_scalar('MAPVal/@0.5', val_maps["MAP@0.5"], epoch)
+                writer.add_scalar('MAPVal/@0.75', val_maps["MAP@0.75"], epoch)
+                writer.add_scalar("MAPVal/@0.5.0.95.s", val_maps["MAP@0.5.0.95.s"], epoch)
+                writer.add_scalar("MAPVal/@0.5.0.95.m", val_maps["MAP@0.5.0.95.m"], epoch)
+                writer.add_scalar("MAPVal/@0.5.0.95.l", val_maps["MAP@0.5.0.95.l"], epoch)
+                writer.add_scalar("MARVal/@10", val_maps["MAR@10"], epoch)
 
-                evaluator.process(val_inputs, val_outputs)
-                eval_metrics = evaluator.evaluate()
+                # evaluator.process(val_inputs, val_outputs)
+                # eval_metrics = evaluator.evaluate()
                 # for task in ['ef', 'sd', 'kpts', 'bxs']:
                 #     if task in evaluator.get_tasks():
                 #         writer.add_scalar("Val/{}ERR".format(task, task), eval_metrics[task], epoch)
@@ -158,6 +160,7 @@ if __name__ == '__main__':
 
     args = default_argument_parser()
     cfg = cfg_costum_setup(args)
+
 
     plt.ioff()
     train(cfg)

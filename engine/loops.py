@@ -9,6 +9,8 @@ from data.USKpts import USKpts
 from utils.utils_files import AverageMeter
 from utils.coco_utils import get_coco_api_from_dataset
 from utils.coco_eval import CocoEvaluator
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
+
 ########################################################
 ########################################################
 # Run single epoch for Train/Validate/Eval
@@ -90,9 +92,9 @@ def validate(mode: str,
     inputs, outputs = dict(), dict()
     maps = { }
 
-    coco = get_coco_api_from_dataset(loader.dataset)
-    iou_types = ["bbox"]
-    coco_evaluator = CocoEvaluator(coco, iou_types)
+    # coco = get_coco_api_from_dataset(loader.dataset)
+    # iou_types = ["bbox"]
+    # coco_evaluator = CocoEvaluator(coco, iou_types)
 
     with tqdm(total=len(loader), ascii=True, desc=('{}: {:02d}'.format(prefix, epoch))) as pbar:
         for batch_i, data in enumerate(loader, 0):
@@ -102,48 +104,37 @@ def validate(mode: str,
             
             # =================== forward =====================
             batch_loss, batch_output = run_forward(model, data, criterion, device)
-
+  
             pbar.update()
             
-
             boxes_pred = [{k: v.to(cpu_device) for k, v in t.items()} for t in batch_output["boxes_pred"]]
             boxes_gt = [{k: v.to(cpu_device) for k, v in t.items()} for t in batch_output["boxes_gt"]]
 
-            res = {target["image_id"].item(): output for target, output in zip(data[1], boxes_pred)}
-            coco_evaluator.update(res)
-            # for dat_name, dat in batch_output.items():
-            #     if dat_name in ["boxes_pred","boxes_gt"]:
-            #         numpy_dat = []
-            #         for img in dat:
-            #             img_data = {}
-            #             for k,v in img.items():
-            #                 img_data[k] = to_numpy(v)
-            #             numpy_dat.append(img_data)
-            #     else:
-            #         numpy_dat = []
-            #         for img in dat:
-            #             numpy_dat.append(to_numpy(img))
-            #     batch_output[dat_name] = numpy_dat
-            # accumulate losses:
-            # losses["main"].update(stats[0], len(filenames))
-            # if "reported_loss" in batch_loss:
-            #     losses["bxs"].update(batch_loss["reported_loss"], len(filenames))
+            metric = MeanAveragePrecision(class_metrics=True)
+            metric.update(boxes_pred, boxes_gt)
+            stats = metric.compute()
+
+            # res = {target["image_id"].item(): output for target, output in zip(data[1], boxes_pred)}
+            # coco_evaluator.update(res)
 
             # accumulate outputs nad inputs:
             for ii, filename in enumerate(filenames):
                 inputs[filename] = boxes_gt[ii]
                 outputs[filename] = boxes_pred[ii]
 
-    coco_evaluator.synchronize_between_processes()
-    coco_evaluator.accumulate()
-    stats = coco_evaluator.summarize()
-    maps["MAP@0.5.0.95"] = stats[0]
-    maps["MAP@0.5"] = stats[1]
-    maps["MAP@0.75"] = stats[2]
-    maps["MAP@0.5.0.95.s"] = stats[3]
-    maps["MAP@0.5.0.95.m"] = stats[4]
-    maps["MAP@0.5.0.95.l"] = stats[5]
-
+    # coco_evaluator.synchronize_between_processes()
+    # coco_evaluator.accumulate()
+    # stats = coco_evaluator.summarize()
+    maps["MAP@0.5.0.95"] = stats['map'].float() 
+    maps["MAP@0.5"] = stats['map_50'].float()  
+    maps["MAP@0.75"] = stats['map_75'].float()
+    maps["MAP@0.5.0.95.s"] = stats['map_small'].float()
+    maps["MAP@0.5.0.95.m"] = stats['map_medium'].float()
+    maps["MAP@0.5.0.95.l"] = stats['map_large'].float()
+    maps["MAR@10"] = stats['mar_10'].float()
+    print("""
+    EPOCH {}: \t MAP@0.5.0.95: {}
+    """.format(epoch, stats['map'].float()))
     return maps, outputs, inputs
 
 ########################################
