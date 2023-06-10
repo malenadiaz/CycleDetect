@@ -10,8 +10,6 @@ def plot_boxes(og_img, boxes, labels=[], scores=None, label_map=None):
         c = (0,255,0)
     for i in range(len(boxes)):
         x_min, y_min, x_max, y_max = boxes[i] #coordinates #1,2 3,4
-        if scores is not None:
-            print(label_map[labels[i]], x_min, y_min, x_max, y_max, scores[i])
         w = x_max - x_min
         h = y_max - y_min
 
@@ -34,7 +32,7 @@ def plot_boxes(og_img, boxes, labels=[], scores=None, label_map=None):
         w, h = cv2.getTextSize(
             final_label, 
             cv2.FONT_HERSHEY_SIMPLEX, 
-            fontScale=0.3, 
+            fontScale=0.4, 
             thickness=tf
         )[0]  # text width, height
 
@@ -62,7 +60,7 @@ def plot_boxes(og_img, boxes, labels=[], scores=None, label_map=None):
             final_label, 
             (x_min, y_min_txt if scores is not None else y_max_txt),
             cv2.FONT_HERSHEY_SIMPLEX, 
-            fontScale=0.3, 
+            fontScale=0.4, 
             color=(0, 0, 0), 
             thickness=tf, 
             lineType=cv2.LINE_AA
@@ -76,8 +74,7 @@ def plot_img(img, boxes):
 
 def plot_boxes_self_preds(fig, img, gt_boxes, pred_boxes, scores, gt_labels, pred_labels, label_map):
      # option 1: clean img + kpts_img
-    plt.clf()
-    ax = plt.gca()
+    ax = fig.gca()
     #
     img = plot_boxes(img, gt_boxes,labels=gt_labels, label_map=label_map)
     img = plot_boxes(img, pred_boxes, labels=pred_labels, scores=scores, label_map=label_map)

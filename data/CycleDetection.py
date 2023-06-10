@@ -82,8 +82,9 @@ class CycleDetection(data.Dataset):
         boxes = self.BOX_COORDS[index].astype(int)
         #boxes = self.normalize_pose(pose=boxes, frame=img)
 
-        labels = [self.LABELS[index]] * len(boxes)
-        
+        #labels = [self.LABELS[index]] * len(boxes)
+        labels = [1] * len(boxes)
+
         boxes_length = len(boxes)
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0]) if boxes_length > 0 else torch.as_tensor(boxes, dtype=torch.float32)
         iscrowd = torch.zeros((boxes.shape[0],), dtype=torch.int64) if boxes_length > 0 else torch.as_tensor(boxes, dtype=torch.float32)
@@ -171,9 +172,9 @@ class CycleDetection(data.Dataset):
         plot_img(img, boxes)
         nnm = os.path.join(print_folder, print_fname)
         plt.savefig(nnm + ".png")
-        print(nnm)
 
     def get_labels(self):
-        return {1:"Ute Art.", 2:"Aor. Isth.",3: "Duct. Ven.", 
-                4:"L.Ventr In/Out", 5:"Umb Art.",
-                6:"Mid. Cere. Art." }                              
+        return {1:"Umb Art."}
+        # return {1:"Ute Art.", 2:"Aor. Isth.",3: "Duct. Ven.", 
+        #         4:"L.Ventr In.Out", 5:"Umb Art.",
+        #         6:"Mid. Cere. Art." }                              

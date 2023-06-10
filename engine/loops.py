@@ -10,7 +10,7 @@ from utils.utils_files import AverageMeter
 from utils.coco_utils import get_coco_api_from_dataset
 from utils.coco_eval import CocoEvaluator
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
-
+import time 
 ########################################################
 ########################################################
 # Run single epoch for Train/Validate/Eval
@@ -95,7 +95,7 @@ def validate(mode: str,
     # coco = get_coco_api_from_dataset(loader.dataset)
     # iou_types = ["bbox"]
     # coco_evaluator = CocoEvaluator(coco, iou_types)
-
+    total_fps = 0 
     with tqdm(total=len(loader), ascii=True, desc=('{}: {:02d}'.format(prefix, epoch))) as pbar:
         for batch_i, data in enumerate(loader, 0):
 
@@ -104,7 +104,8 @@ def validate(mode: str,
             
             # =================== forward =====================
             batch_loss, batch_output = run_forward(model, data, criterion, device)
-  
+            fps = 1/(batch_output["time"]/2)
+            total_fps += fps
             pbar.update()
             
             boxes_pred = [{k: v.to(cpu_device) for k, v in t.items()} for t in batch_output["boxes_pred"]]
@@ -135,6 +136,7 @@ def validate(mode: str,
     print("""
     EPOCH {}: \t MAP@0.5.0.95: {}
     """.format(epoch, stats['map'].float()))
+    print("Average FPS: {:.3f}".format(total_fps / len(loader.dataset)))
     return maps, outputs, inputs
 
 ########################################

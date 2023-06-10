@@ -3,6 +3,7 @@ from typing import List, Dict, Tuple
 import numpy as np 
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from torchvision.ops.boxes import _box_inter_union
+import time 
 
 def seq2ef(model: torch.nn, data: List, criterion: torch.nn, device: torch.device) -> Tuple[Dict, Dict]:
     imgs, ef = data[0].to(device), data[3].to(device)
@@ -42,6 +43,7 @@ def objectDetect(model: torch.nn, data: List, criterion: torch.nn, device: torch
     pred_boxes = None
     loss = None
     all_losses = {}
+    elapsed_time  = 0.0
 
     if model.training:
         loss_dict = model(imgs, boxes)
@@ -50,13 +52,11 @@ def objectDetect(model: torch.nn, data: List, criterion: torch.nn, device: torch
                         ,"object_loss":loss_dict['loss_objectness'], 'rpn_loss': loss_dict['loss_rpn_box_reg']}
     else:
         with torch.no_grad():
+            start_time = time.time()
             pred_boxes = model(imgs, boxes)
-            # m = MeanAveragePrecision()
-            # m.update(pred_boxes, boxes)
-            # loss = m.compute()['map']
-            # loss = 1 - loss
+            elapsed_time = time.time() - start_time
         
-    outputs = {"boxes_pred": pred_boxes, "boxes_gt": boxes, "imgs": imgs}
+    outputs = {"boxes_pred": pred_boxes, "boxes_gt": boxes, "imgs": imgs, "time": elapsed_time }
     losses = {"loss": loss, "reported_loss": loss} | all_losses
 
     return losses, outputs

@@ -16,8 +16,10 @@ import numpy as np
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from utils.utils_files import to_numpy
 #51 eval https://docs.voxel51.com/user_guide/evaluation.html#evaluating-models
-from utils.utils_stat import evaluate_51
+from utils.stats_51 import evaluate_51, convert_to_fityone
+from utils.utils_stat import save_stats, NMS_vs_CT, filter_nms, filter_conf, filter_labels, get_label, plot_matrix
 from torchvision.ops import nms
+from sklearn.metrics import confusion_matrix
 SMOOTH = 1e-6
 
 
@@ -50,6 +52,9 @@ class ObjectDetectEvaluator(DatasetEvaluator):
 
         self._cpu_device = torch.device("cpu")
         self._do_evaluation = True  # todo: add option to evaluate without gt
+        self.nms_t = 0.3
+        self.conf_t = 0.5
+        self.multiclass = len(self._dataset.get_labels()) > 1
 
     def set_logger(self, logname):
         print("Evaluation log file is set to {}".format(logname))
@@ -73,28 +78,27 @@ class ObjectDetectEvaluator(DatasetEvaluator):
         targets = []
         # metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=True, num_classes=1)
 
-        if self._output_dir:
-            preds_numpy = {t.split('/')[-1]:{k: to_numpy(v) for k, v in predictions[t]["pred"].items()} for t in predictions}
-            evaluate_51(self._dataset, preds_numpy,self._output_dir)
+        if self._output_dir: #create confusion matrix and PR
+            fo_dataset = convert_to_fityone(self._dataset)
+            self.fp, self.fn = evaluate_51(fo_dataset,self._dataset, predictions,self._output_dir, self.nms_t, self.conf_t)
 
+        pred_labels = []
+        gt_labels = []
         for prediction in predictions.values():
             targets.append(prediction["gt"])
             preds.append(prediction['pred'])
+            pred_labels.append(get_label(prediction["pred"]) - 1)
+            gt_labels.append(prediction["gt"]['labels'][0].int() - 1)
+        plot_matrix(gt_labels, pred_labels, self._dataset.get_labels(), self._output_dir)
 
-            # gt,preds = self.convert_metric(prediction)
-            # metric_fn.add(preds, gt)
-            
-            # m.update(torch.Tensor([prediction["bxs_prediction"]]), torch.Tensor([prediction["bxs"]]))
-            # pred = prediction["bxs_prediction"], prediction["boxes"]
-            # /iou = self.iou_numpy(prediction["bxs_prediction"]['boxes'], prediction["bxs"]['boxes'])
-            # dist_pred_gt_kpts.append(100 * match_two_kpts_set(prediction["keypoints"].reshape(num_kpts * num_annotated_frames, 2),
-            #      
-            # 
 
+        #compare NMS vs CT
+        #NMS_vs_CT(preds, targets, self._dataset.get_labels(), self._output_dir)
+        
         metric = MeanAveragePrecision(class_metrics=True)
         metric.update(preds, targets)
         stats = metric.compute()
-        print(stats)
+        save_stats(stats, self._output_dir, self._dataset.get_labels(), per_class = self.multiclass)
         map = stats['map'].float()     
         if self._verbose:
             self._logger.info("MAP @ error is {}".format(map))
@@ -112,19 +116,6 @@ class ObjectDetectEvaluator(DatasetEvaluator):
         preds = np.hstack((preds,class_id))
         preds = np.hstack((preds,scores))
         return gt, preds
-    # def iou_numpy(self,outputs: np.array, labels: np.array):
-    #     outputs = outputs.squeeze(1)
-        
-    #     intersection = (outputs & labels).sum((1, 2))
-    #     union = (outputs | labels).sum((1, 2))
-        
-    #     iou = (intersection + SMOOTH) / (union + SMOOTH)
-        
-    #     thresholded = np.ceil(np.clip(20 * (iou - 0.5), 0, 10)) / 10
-        
-    #     return thresholded  # Or thresholded.mean()
-
-
 
     def process(self, inputs: Dict, outputs: Dict) -> None:
         """
@@ -147,8 +138,9 @@ class ObjectDetectEvaluator(DatasetEvaluator):
             if "bxs" in tasks:
                 prediction["gt"] = inputs[data_path]
                 pred = outputs[data_path]
-                pred_pos = nms(pred['boxes'], pred['scores'], iou_threshold=0.8)
-                pred = {k:v[pred_pos] for k,v in pred.items()}
+                pred = filter_nms(pred, self.nms_t)
+                pred = filter_conf(pred, self.conf_t)
+                # pred = filter_labels(pred)
                 prediction["pred"] = pred
 
             # get case name:
@@ -168,7 +160,7 @@ class ObjectDetectEvaluator(DatasetEvaluator):
         if len(predictions) == 0 and self._verbose:
             self._logger.warning("[ObjectDetectEvaluator] Did not receive valid predictions.")
             return {}
-
+        
         if self._output_dir is not None:
             if not os.path.exists(self._output_dir):
                 os.makedirs(self._output_dir)
@@ -180,7 +172,6 @@ class ObjectDetectEvaluator(DatasetEvaluator):
                 boxes_pred = {k: to_numpy(v) for k, v in predictions[data_path]["pred"].items()}
                 numpy_preds[data_path] = {"data_path_from_root": data_path, "gt":boxes_gt, "pred":boxes_pred}
             with open(file_path, 'wb') as handle:
-
                 pickle.dump(numpy_preds, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         if not self._do_evaluation and self._verbose:
@@ -203,18 +194,39 @@ class ObjectDetectEvaluator(DatasetEvaluator):
    
    
     def plot(self, num_examples_to_plot: int) -> None:
-        fig = plt.figure(constrained_layout=True, figsize=(16, 16))
+        fig = plt.figure(constrained_layout=True, figsize=(25, 15))
         plot_directory = os.path.join(self._output_dir, "plots")
         if os.path.exists(plot_directory):
             shutil.rmtree(plot_directory)
         os.makedirs(plot_directory)
+        os.makedirs(os.path.join(plot_directory, "FP"))
+        os.makedirs(os.path.join(plot_directory, "FN"))
+
         self._logger.info("plotting {} prediction examples to {}".format(num_examples_to_plot, plot_directory))
-        for data_path in random.sample(list(self._predictions), num_examples_to_plot):
-            prediction = self._predictions[data_path]
+        
+        for data_path in self.fp:#plot FP
+            file_path = os.path.join(self._dataset.img_folder, data_path)
+            prediction = self._predictions[file_path]
+            fig.clf()
+            fig = self._plot_boxes_prediction(fig, prediction["data_path_from_root"],prediction["pred"])
+            plot_filename = "{}.jpg".format(os.path.splitext(prediction["data_path_from_root"])[0].replace("/", "_"))
+            fig.savefig(fname=os.path.join(plot_directory, "FP", plot_filename))
+
+        for data_path in self.fn:#plot FN
+            file_path = os.path.join(self._dataset.img_folder, data_path)
+            prediction = self._predictions[file_path]
+            fig.clf()
+            fig = self._plot_boxes_prediction(fig, prediction["data_path_from_root"],prediction["pred"])
+            plot_filename = "{}.jpg".format(os.path.splitext(prediction["data_path_from_root"])[0].replace("/", "_"))
+            fig.savefig(fname=os.path.join(plot_directory, "FN", plot_filename))
+
+        for data_path in random.sample(list(self._predictions), 10):
+            prediction = self._predictions[file_path]
             fig.clf()
             fig = self._plot_boxes_prediction(fig, prediction["data_path_from_root"],prediction["pred"])
             plot_filename = "{}.jpg".format(os.path.splitext(prediction["data_path_from_root"])[0].replace("/", "_"))
             fig.savefig(fname=os.path.join(plot_directory, plot_filename))
+        
 
     def _plot_boxes_prediction(self,fig, data_path_from_root,boxes_prediction):
         datapoint_index = self._dataset.img_list.index(data_path_from_root)

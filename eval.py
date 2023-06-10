@@ -14,7 +14,6 @@ from evaluation.EchonetEvaluator import EchonetEvaluator
 from datasets import datas, load_dataset
 from utils.utils_files import to_numpy
 from config.defaults import cfg_costum_setup, default_argument_parser,overwrite_eval_cfg
-from utils.utils_stat import evaluate_51
 
 def sliding():
     mode = 'sliding_window'
@@ -62,6 +61,7 @@ def eval_trained_model(model: torch.nn.Module, cfg: CfgNode, ds: datas,
     # frames_info_file = frames_info_file[frames_info_file.Split == "TEST"]
 
     evaluator = ObjectDetectEvaluator(dataset=ds.testset, tasks=["bxs"], output_dir=out_directory)
+    
     evaluator.process(test_inputs, test_outputs)
     evaluator.evaluate()
     evaluator.plot(num_examples_to_plot=min(num_examples_to_plot, len(test_outputs)))
