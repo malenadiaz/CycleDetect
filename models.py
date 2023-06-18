@@ -1,6 +1,11 @@
+"""
+Created by Malena Díaz Río. 
+"""
+import torch
 import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
-import torch 
+
+
 def load_model(cfg, is_gpu = None):
     
     # # load Faster RCNN pre-trained model

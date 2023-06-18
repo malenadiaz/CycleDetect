@@ -11,6 +11,7 @@ from sklearn.metrics import confusion_matrix
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import itertools
 
+#save the stats to a .txt
 def save_stats(stats, output_dir, label_map, per_class = True):
     results = """
     MAP @50-95: {:.4f}
@@ -44,12 +45,13 @@ def save_stats(stats, output_dir, label_map, per_class = True):
     with open(os.path.join(output_dir, "map.txt"), "w") as fp:
         fp.write(results)
 
-
+#filter per position
 def filter_pred_positions(pred, pos):
     if len(pos) > 0: 
         pred = {k:v[pos] for k,v in pred.items()}
     return pred
 
+#get label of the prediction
 def get_label(pred):
     sorted , indices = torch.sort( pred['scores'])
     indices = indices[:5]
@@ -57,6 +59,7 @@ def get_label(pred):
     value = value.item()
     return value
 
+#filter by label
 def filter_labels(pred):
     sorted , indices = torch.sort( pred['scores'])
     indices = indices[:5]
@@ -65,17 +68,19 @@ def filter_labels(pred):
     pred['labels'] =  torch.full_like(pred['labels'], value)
     return pred
 
+#apply nms to predictions and filters
 def filter_nms(pred, thresh):
     pos = nms(pred['boxes'], pred['scores'], iou_threshold=thresh)
     pred = filter_pred_positions(pred, pos)
     return pred
 
-
+#filter predictions by confidence threshold
 def filter_conf(pred, thresh):
     pos = [ i for i, v in enumerate(pred['scores']) if v >= thresh]
     pred = filter_pred_positions(pred, pos)
     return pred
 
+#plot confusion matrix same as 51 function
 def plot_matrix(true, pred, labels, out_dir):
     labels = list(labels.values())
     cm = confusion_matrix(true,pred)
@@ -85,7 +90,6 @@ def plot_matrix(true, pred, labels, out_dir):
     cm = np.asarray(cm)
     nrows = cm.shape[0]
     ncols = cm.shape[1]
-
 
     im = ax.imshow(cm, interpolation="nearest", cmap="viridis")
 
@@ -122,27 +126,28 @@ def plot_matrix(true, pred, labels, out_dir):
     fig.colorbar(im, cax=cax)
 
     plt.tight_layout()
+
     # Save the confusion matrix plot
     output_path = os.path.join(out_dir, 'cm_real_class.png')
     plt.savefig(output_path)
 
+#compute map and mar for different NSM and confidence threshold and plot them
 def NMS_vs_CT(preds, targets, labels, output_dir):
 
     NMS_THRESH = [0.1, 0.2, 0.3, 0.4, 0.5]
     CT_THRESH = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
 
     label_names = ['general'] + list(labels.values())
-    # map_results = {k:[] for k in label_names}
     map_results = {k1:None for k1 in NMS_THRESH}
     mar_results = {k1:None for k1 in NMS_THRESH}
 
-    for nms in NMS_THRESH:
-        nms_filtered_preds = list(map(lambda x: filter_nms(x, nms), preds))
+    for nms in NMS_THRESH: 
+        nms_filtered_preds = list(map(lambda x: filter_nms(x, nms), preds)) #filter preds by nms 
         
         ct_results_map = {k2:[] for k2 in label_names}
         ct_results_mar = {k2:[] for k2 in label_names}
 
-        for ct in CT_THRESH:
+        for ct in CT_THRESH: #filter preds by confidence thresholds 
             ct_filtered_preds = list(map(lambda x: filter_conf(x, ct), nms_filtered_preds))
             
             metric = MeanAveragePrecision(class_metrics=True)
@@ -156,13 +161,14 @@ def NMS_vs_CT(preds, targets, labels, output_dir):
                 ct_results_map[labels[i + 1]].append(value.float())
             for i, value in enumerate(stats['mar_100_per_class']):
                 ct_results_mar[labels[i + 1]].append(value.float())
+
         map_results[nms] = ct_results_map
         mar_results[nms] = ct_results_mar
 
     plot_NMS_vs_CT(map_results, CT_THRESH , output_dir, label_names, ylabel = "Precision")
     plot_NMS_vs_CT(mar_results, CT_THRESH , output_dir, label_names, ylabel = "Recall")
 
-
+#plot curve NMS vs CT. MAP or MAR is the y axis, CT the x axis and there is one line per NMS 
 def plot_NMS_vs_CT(results, x, output_dir, label_names, ylabel = None):
     for label in label_names:
         plt.clf()

@@ -16,7 +16,6 @@ from engine.checkpoints import save_model
 from optimizers import load_optimizer
 import matplotlib.pyplot as plt
 import warnings
-from utils.coco_utils import get_coco_api_from_dataset
 
 warnings.filterwarnings("ignore", message=r"The frame.append", category=FutureWarning)
 
@@ -33,11 +32,6 @@ def train(cfg):
         is_gpu = True
     else:
         is_gpu = False
-
-    # from config import (
-    #     DEVICE, NUM_CLASSES, NUM_EPOCHS, OUT_DIR,
-    #     VISUALIZE_TRANSFORMED_IMAGES, NUM_WORKERS,
-    # )
 
     print("Train Config:\n", cfg)
 
@@ -126,11 +120,6 @@ def train(cfg):
                 writer.add_scalar("MAPVal/@0.5.0.95.l", val_maps["MAP@0.5.0.95.l"], epoch)
                 writer.add_scalar("MARVal/@10", val_maps["MAR@10"], epoch)
 
-                # evaluator.process(val_inputs, val_outputs)
-                # eval_metrics = evaluator.evaluate()
-                # for task in ['ef', 'sd', 'kpts', 'bxs']:
-                #     if task in evaluator.get_tasks():
-                #         writer.add_scalar("Val/{}ERR".format(task, task), eval_metrics[task], epoch)
 
                 if val_maps["MAP@0.5.0.95"] > best_val_MAP:
                     filename = os.path.join(log_folder, 'weights_{}_best_map.pth'.format(basename))
@@ -138,17 +127,8 @@ def train(cfg):
                     save_model(filename, epoch, model, cfg, train_loss, best_val_MAP, best_val_metric, hostname)
                     print("Saved at MAP {:.5f}\n".format(best_val_MAP))
                     writer.add_scalar('BestVal/MAP', best_val_MAP, epoch)
-
-                # # Update best val metric:
-                # for task in ['ef', 'sd', 'kpts', 'bxs']:
-                #     if task in eval_metrics and eval_metrics[task] < best_val_metric[task]:
-                #         filename = os.path.join(log_folder, 'weights_{}_best_{}Err.pth'.format(basename, task))
-                #         best_val_metric[task] = eval_metrics[task]
-                #         writer.add_scalar("BestVal/{}Err".format(task), best_val_metric[task], epoch)
-                #         if task in ['ef', 'kpts', 'bxs']:
-                #             save_model(filename, epoch, model, cfg, train_loss, val_loss, best_val_metric, hostname)
-                #             print("Saved at val loss {:.5f}, {} error {:.5f}%\n".format(val_loss, task, eval_metrics[task]))
-        # Save & Close:
+    
+    # Save & Close:
     print('Finished Training')
     filename = os.path.join(log_folder, 'weights_{}_ep_{}.pth'.format(basename, epoch))
     save_model(filename, epoch, model, cfg, train_loss, val_maps["MAP@0.5.0.95"], best_val_MAP, hostname)

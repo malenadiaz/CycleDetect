@@ -1,24 +1,25 @@
+#51 eval https://docs.voxel51.com/user_guide/evaluation.html#evaluating-models
+
+import os
+import re
+import sys
+
 import fiftyone as fo
 import fiftyone.utils.coco as fouc
 import fiftyone.utils.eval as fue
-import torch
-import os 
-from datetime import datetime
-import re
-import matplotlib.pyplot as plt
+
 from fiftyone import ViewField as F
-from utils.utils_stat import filter_nms
 from torchvision.ops import nms
 from utils.utils_files import to_numpy
-import sys
 
-def convert_to_fityone(ds):
+
+def convert_to_fityone(ds): #converts the CycleDetect dataset to the fiftyone format
     samples = []
     label_map = ds.get_labels()
     for img_idx in range(len(ds)):
         data = ds.get_img_and_bxs(img_idx)
         f = os.path.join(os.getcwd(), ds.img_folder, ds.img_list[img_idx])
-        sample = fo.Sample(filepath=f)
+        sample = fo.Sample(filepath=f) #add sample to the dataset
        
         img = data['img']
         w = img.shape[1]
@@ -28,12 +29,13 @@ def convert_to_fityone(ds):
         bboxes = data["boxes"].tolist()
         num_objs = len(bboxes)
         detections = []
+
         for i in range(num_objs):
             label = labels[i]
             bbox = bboxes[i]
             bounding_box = [bbox[0] /w , bbox[1]/h, (bbox[2] - bbox[0])/w, (bbox[3]- bbox[1])/h]
             detections.append(
-            fo.Detection(label=label_map[label], bounding_box=bounding_box)
+            fo.Detection(label=label_map[label], bounding_box=bounding_box) #add detection to the dataset
             )
         sample["ground_truth"] = fo.Detections(detections=detections)
         samples.append(sample)
@@ -65,11 +67,8 @@ def convert_torch_predictions(preds, det_id, s_id, w, h, classes, nms_t=None):
     return detections, det_id
 
 def add_detections( dataset, view, pred, img_path, nms_t=None, key="predictions"):
-    # Run inference on a dataset and add results to FiftyOne
-    classes = list(dataset.get_labels().values())
+    #add results to FiftyOne
     det_id = 0
-
-
     img_path = os.path.join(os.getcwd(), img_path)
     img_path_prev = ""
     while img_path_prev != img_path:
@@ -91,12 +90,14 @@ def add_detections( dataset, view, pred, img_path, nms_t=None, key="predictions"
     sample[key] = detections
     sample.save()
 
+#Given an nms threshold and a confidence one, creates confusion matrix, PR curve and precision report.
 def evaluate_51(fo_dataset, ds, predictions, output_dir, nms_t, conf):
     torch_preds ={t.split('/')[-1]:{k: to_numpy(v) for k, v in predictions[t]["pred"].items()} for t in predictions}
     classes = list(ds.get_labels().values())
-    for filename in torch_preds:
-        add_detections(ds, fo_dataset, torch_preds[filename], os.path.join(ds.img_folder, filename), nms_t )
 
+    for filename in torch_preds: #add predictions
+        add_detections(ds, fo_dataset, torch_preds[filename], os.path.join(ds.img_folder, filename), nms_t )
+ 
     results = fue.evaluate_detections(
                     fo_dataset, 
                     "predictions", 
@@ -105,7 +106,7 @@ def evaluate_51(fo_dataset, ds, predictions, output_dir, nms_t, conf):
                     classwise=False, missing="No Object",
                     compute_mAP=True
             )
-
+    #plot confusion matrix and PR curve
     plot = results.plot_confusion_matrix(backend='matplotlib')
     plot.savefig(os.path.join(output_dir, "Confusion matrix_NMS{}_C{}.png".format(nms_t,conf)))
     plot = results.plot_pr_curves(classes=classes, backend='matplotlib')
@@ -116,7 +117,7 @@ def evaluate_51(fo_dataset, ds, predictions, output_dir, nms_t, conf):
     fp_key = "eval" + "_fp"
     fn_key = "eval" + "_fp"
 
-    for sample in fo_dataset:
+    for sample in fo_dataset: #create a list with objects containing FP and FN
         if sample[fp_key] > 0:
             FP_frames.append(sample.filepath.split("/")[-1])
         if sample[fn_key] > 0:
@@ -126,9 +127,10 @@ def evaluate_51(fo_dataset, ds, predictions, output_dir, nms_t, conf):
 
     original_stdout = sys.stdout 	
 
+    # Print a classification report 
+
     with open(os.path.join(output_dir, 'classification_report.txt'), 'w') as f:
         sys.stdout = f
-        # Print a classification report for the top-10 classes
         results.print_report(classes=classes)
 
         # Print some statistics about the total TP/FP/FN counts
@@ -140,6 +142,7 @@ def evaluate_51(fo_dataset, ds, predictions, output_dir, nms_t, conf):
 
     return FP_frames, FN_frames
 
+#Creates confusion matrix and counts FP with diffferent NSM thresholds and confidence threshold
 def evaluate_51_NMS(fo_dataset, ds, predictions, output_dir):
 
     NMS_THRESH = [0.4]
@@ -148,7 +151,7 @@ def evaluate_51_NMS(fo_dataset, ds, predictions, output_dir):
     torch_preds ={t.split('/')[-1]:{k: v for k, v in predictions[t]["pred"].items()} for t in predictions}
 
     prediction_keys = []
-    for nms_t in NMS_THRESH:
+    for nms_t in NMS_THRESH: #create predictions for each NMS threshold
         nms_key = "predictions_{}".format(int(nms_t * 10) )
         prediction_keys.append(nms_key)
         for filename in torch_preds:
@@ -158,11 +161,13 @@ def evaluate_51_NMS(fo_dataset, ds, predictions, output_dir):
             pred = {k: to_numpy(v) for k,v in pred.items()}
             add_detections(ds, fo_dataset, pred, os.path.join(ds.img_folder, filename), nms_t, key = nms_key )
     views = {}
+
     for conf in CONF_THRESH:
         for i in range(len(prediction_keys)):
             nms_t =  NMS_THRESH[i]
             nms_key = prediction_keys[i]
-            views[conf] = (
+
+            views[conf] = ( #create mini datasets filtering with the confidence threshold
             fo_dataset
             .filter_labels(nms_key, (F("confidence") > conf) )
             )
@@ -178,15 +183,14 @@ def evaluate_51_NMS(fo_dataset, ds, predictions, output_dir):
                     compute_mAP=True
             )
 
+            #plot confusion matrix
             plot = results.plot_confusion_matrix(backend='matplotlib')
             plot.savefig(os.path.join(output_dir, "Confusion matrix_NMS{}_C{}.png".format(nms_t,conf)))
-            # plot = results.plot_pr_curves(backend='matplotlib')
-            # plot.savefig(os.path.join(output_dir, "PR Curve_NMS{}_C{}.png".format(nms_t,conf)))
 
             FP_frames = []
             fp_key = key + "_fp"
 
-            for sample in views[conf]:
+            for sample in views[conf]: #counts number of false positives
                 if sample[fp_key] > 0:
                     FP_frames.append(sample.filepath.split("/")[-1])
             print("Number of frames with FP:{}. Sample:{}".format(len(FP_frames), FP_frames[0]))

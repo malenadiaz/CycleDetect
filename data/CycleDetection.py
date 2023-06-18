@@ -1,16 +1,20 @@
-import torch
+"""
+Created by Malena Díaz Río. 
+"""
 import os
-import numpy as np
-import cv2
+from typing import Dict, List
+
 import albumentations as A
-from PIL import Image
-import glob
-from typing import List, Dict
+import cv2
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
 import torchvision.transforms as torch_transforms
-from utils.plot import plot_img
+from PIL import Image
 # internal:
 from torch.utils import data
+from utils.plot import plot_img
+
 
 class CycleDetection(data.Dataset):
     def __init__(self, dataset_config, filenames_list: str = None, transform: A.core.composition.Compose = None):
@@ -80,13 +84,15 @@ class CycleDetection(data.Dataset):
 
         #load boxes and convert them to tensors 
         boxes = self.BOX_COORDS[index].astype(int)
-        #boxes = self.normalize_pose(pose=boxes, frame=img)
 
-        #labels = [self.LABELS[index]] * len(boxes)
-        labels = [1] * len(boxes)
+        #depends on multiclass and umbilical artery approach
+        labels = [self.LABELS[index]] * len(boxes)
+        #labels = [1] * len(boxes)
 
         boxes_length = len(boxes)
+        #compute area of bbox
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0]) if boxes_length > 0 else torch.as_tensor(boxes, dtype=torch.float32)
+        #define all objects as not crowd
         iscrowd = torch.zeros((boxes.shape[0],), dtype=torch.int64) if boxes_length > 0 else torch.as_tensor(boxes, dtype=torch.float32)
 
         data = {"img": img,
@@ -134,13 +140,12 @@ class CycleDetection(data.Dataset):
             img = data["img"]
             boxes = data["boxes"]
         
-        #boxes = self.normalize_pose(pose=boxes, frame=img)
-
         # transform:
         img = Image.fromarray(np.uint8(img))
         img = self.basic_transform(img) #normalize to 0 1 values
 
         target = {}
+
         #boxes
         boxes = torch.tensor(boxes).float() #convert box annotations to tensors 
         target["boxes"] = boxes
@@ -173,8 +178,8 @@ class CycleDetection(data.Dataset):
         nnm = os.path.join(print_folder, print_fname)
         plt.savefig(nnm + ".png")
 
-    def get_labels(self):
-        return {1:"Umb Art."}
-        # return {1:"Ute Art.", 2:"Aor. Isth.",3: "Duct. Ven.", 
-        #         4:"L.Ventr In.Out", 5:"Umb Art.",
-        #         6:"Mid. Cere. Art." }                              
+    def get_labels(self): #depends on multiclass or ummbilical artery approach
+        #return {1:"Umb Art."}
+        return {1:"Ute Art.", 2:"Aor. Isth.",3: "Duct. Ven.", 
+                4:"L.Ventr In.Out", 5:"Umb Art.",
+                6:"Mid. Cere. Art." }                              

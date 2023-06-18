@@ -1,25 +1,28 @@
-from .BaseEvaluator import DatasetEvaluator
-from typing import Dict, List, Tuple
-from datasets import datas
-import torch 
-import os 
-import logging
-import pickle
-from collections import OrderedDict
+"""
+Created by Malena Díaz Río. 
+"""
 import copy
-import matplotlib.pyplot as plt
-import shutil
+import logging
+import os
+import pickle
 import random
-import cv2 
-from utils.plot import plot_boxes_self_preds
+import shutil
+from collections import OrderedDict
+from typing import Dict, List
+
+import matplotlib.pyplot as plt
 import numpy as np
+import torch
+from datasets import datas
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+from utils.plot import plot_boxes_self_preds
+from utils.stats_51 import convert_to_fityone, evaluate_51
 from utils.utils_files import to_numpy
-#51 eval https://docs.voxel51.com/user_guide/evaluation.html#evaluating-models
-from utils.stats_51 import evaluate_51, convert_to_fityone
-from utils.utils_stat import save_stats, NMS_vs_CT, filter_nms, filter_conf, filter_labels, get_label, plot_matrix
-from torchvision.ops import nms
-from sklearn.metrics import confusion_matrix
+from utils.utils_stat import (filter_conf, filter_nms, get_label, plot_matrix,
+                              save_stats)
+
+from .BaseEvaluator import DatasetEvaluator
+
 SMOOTH = 1e-6
 
 
@@ -64,47 +67,6 @@ class ObjectDetectEvaluator(DatasetEvaluator):
                             datefmt='%H:%M:%S',
                             level=logging.DEBUG)    #level=logging.DEBUG)    # level=logging.INFO)
 
-
-    def _eval_boxes_predictions(self, predictions: Dict) -> Dict:
-        """
-        Evaluate keypoints predictions
-        Args:
-            predictions (list[dict]): list of predictions from the model
-        """
-        if self._verbose:
-            self._logger.info("Eval stats for boxes")
-        
-        preds = []
-        targets = []
-        # metric_fn = MetricBuilder.build_evaluation_metric("map_2d", async_mode=True, num_classes=1)
-
-        if self._output_dir: #create confusion matrix and PR
-            fo_dataset = convert_to_fityone(self._dataset)
-            self.fp, self.fn = evaluate_51(fo_dataset,self._dataset, predictions,self._output_dir, self.nms_t, self.conf_t)
-
-        pred_labels = []
-        gt_labels = []
-        for prediction in predictions.values():
-            targets.append(prediction["gt"])
-            preds.append(prediction['pred'])
-            pred_labels.append(get_label(prediction["pred"]) - 1)
-            gt_labels.append(prediction["gt"]['labels'][0].int() - 1)
-        plot_matrix(gt_labels, pred_labels, self._dataset.get_labels(), self._output_dir)
-
-
-        #compare NMS vs CT
-        #NMS_vs_CT(preds, targets, self._dataset.get_labels(), self._output_dir)
-        
-        metric = MeanAveragePrecision(class_metrics=True)
-        metric.update(preds, targets)
-        stats = metric.compute()
-        save_stats(stats, self._output_dir, self._dataset.get_labels(), per_class = self.multiclass)
-        map = stats['map'].float()     
-        if self._verbose:
-            self._logger.info("MAP @ error is {}".format(map))
-        return map
-    
-
     def convert_metric(self, prediction):
         gt = np.array(prediction["bxs"]['boxes'])
         zero_array = np.zeros(shape = (gt.shape[0], 3))
@@ -138,9 +100,8 @@ class ObjectDetectEvaluator(DatasetEvaluator):
             if "bxs" in tasks:
                 prediction["gt"] = inputs[data_path]
                 pred = outputs[data_path]
-                pred = filter_nms(pred, self.nms_t)
+                pred = filter_nms(pred, self.nms_t) #filter through nms and confidence threshold
                 pred = filter_conf(pred, self.conf_t)
-                # pred = filter_labels(pred)
                 prediction["pred"] = pred
 
             # get case name:
@@ -161,12 +122,12 @@ class ObjectDetectEvaluator(DatasetEvaluator):
             self._logger.warning("[ObjectDetectEvaluator] Did not receive valid predictions.")
             return {}
         
-        if self._output_dir is not None:
+        if self._output_dir is not None: #write the predictions in a pickle file
             if not os.path.exists(self._output_dir):
                 os.makedirs(self._output_dir)
             file_path = os.path.join(self._output_dir, "objectDetect_predictions.pkl")
 
-            numpy_preds = {}
+            numpy_preds = {} #convert them to numpy format
             for data_path in predictions:
                 boxes_gt = {k: to_numpy(v) for k, v in predictions[data_path]["gt"].items()}
                 boxes_pred = {k: to_numpy(v) for k, v in predictions[data_path]["pred"].items()}
@@ -186,13 +147,52 @@ class ObjectDetectEvaluator(DatasetEvaluator):
             if self._verbose:
                 self._logger.info("Preparing results in the CycleDetect format for task {} ...".format(task))
             if task == "bxs":
-                res = self._eval_boxes_predictions(predictions)
+                res = self._eval_boxes_predictions(predictions) #evaluate the predictions
             self._results[task] = res
 
         # Copy so the caller can do whatever with results
         return copy.deepcopy(self._results)
-   
-   
+    
+    def _eval_boxes_predictions(self, predictions: Dict) -> Dict:
+        """
+        Evaluate keypoints predictions
+        Args:
+            predictions (list[dict]): list of predictions from the model
+        """
+        if self._verbose:
+            self._logger.info("Eval stats for boxes")
+        
+        preds = []
+        targets = []
+        # metric_fn = MetricBuilder.build_evaluation_metric("map_2d ", async_mode=True, num_classes=1)
+
+        if self._output_dir: #create confusion matrix and PR and get the false negatives and false positives at IoU 0.5
+            fo_dataset = convert_to_fityone(self._dataset)
+            self.fp, self.fn = evaluate_51(fo_dataset,self._dataset, predictions,self._output_dir, self.nms_t, self.conf_t)
+
+        pred_labels = []
+        gt_labels = []
+        for prediction in predictions.values(): #generate real labels 
+            targets.append(prediction["gt"])
+            preds.append(prediction['pred'])
+            pred_labels.append(get_label(prediction["pred"]) - 1)
+            gt_labels.append(prediction["gt"]['labels'][0].int() - 1)
+        plot_matrix(gt_labels, pred_labels, self._dataset.get_labels(), self._output_dir) #create real labels confusion matrix
+
+
+        #compare NMS vs CT in order to define the best thresholds 
+        #NMS_vs_CT(preds, targets, self._dataset.get_labels(), self._output_dir)
+        
+        metric = MeanAveragePrecision(class_metrics=True) #create classification report with MAPs and MARs
+        metric.update(preds, targets)
+        stats = metric.compute()
+        save_stats(stats, self._output_dir, self._dataset.get_labels(), per_class = self.multiclass)
+        map = stats['map'].float()     
+        if self._verbose:
+            self._logger.info("MAP @ error is {}".format(map))
+        return map
+    
+    #plot ground truth vs predictions 
     def plot(self, num_examples_to_plot: int) -> None:
         fig = plt.figure(constrained_layout=True, figsize=(25, 15))
         plot_directory = os.path.join(self._output_dir, "plots")
@@ -227,27 +227,19 @@ class ObjectDetectEvaluator(DatasetEvaluator):
             plot_filename = "{}.jpg".format(os.path.splitext(prediction["data_path_from_root"])[0].replace("/", "_"))
             fig.savefig(fname=os.path.join(plot_directory, plot_filename))
         
-
+    #plot ground truth objects and predictions of one single sample
     def _plot_boxes_prediction(self,fig, data_path_from_root,boxes_prediction):
         datapoint_index = self._dataset.img_list.index(data_path_from_root)
         data = self._dataset.get_img_and_bxs(datapoint_index)
         img = data["img"]
         boxes = data["boxes"]
         labels = data["labels"]
-        # normalize:
-        boxes_prediction = {k: to_numpy(v) for k, v in boxes_prediction.items()}
+
+        boxes_pred = {k: to_numpy(v) for k, v in boxes_prediction.items()}
         boxes = self._dataset.normalize_pose(boxes, img)
-        selected_boxes = np.argwhere(boxes_prediction['scores']>0.45).flatten() #confidence threshold of 0.45
-        boxes_pred = boxes_prediction['boxes'][selected_boxes, :]
-        boxes_pred = self._dataset.normalize_pose(boxes_pred, img)
-       
-        img = cv2.resize(img, dsize=(600, 300), interpolation=cv2.INTER_AREA)
 
-        boxes_pred = self._dataset.denormalize_pose(boxes_pred, img)
-        boxes = self._dataset.denormalize_pose(boxes, img)
-
-        plot_boxes_self_preds(fig, img, gt_boxes=boxes, pred_boxes=boxes_pred, scores=boxes_prediction['scores'][selected_boxes]
-                              , gt_labels = labels, pred_labels=boxes_prediction['labels'][selected_boxes], label_map = self._dataset.get_labels() )
+        plot_boxes_self_preds(fig, img, gt_boxes=boxes, pred_boxes=boxes_pred, scores=boxes_prediction['scores']
+                              , gt_labels = labels, pred_labels=boxes_prediction['labels'], label_map = self._dataset.get_labels() )
 
         return fig
 

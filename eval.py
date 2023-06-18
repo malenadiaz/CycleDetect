@@ -57,8 +57,6 @@ def eval_trained_model(model: torch.nn.Module, cfg: CfgNode, ds: datas,
         os.makedirs(out_directory)
     with open(os.path.join(out_directory,"eval_config.yaml"), "w") as f:
         f.write(cfg.dump())   # save config to file
-    # frames_info_file = pd.read_csv(ds.testset.echonet_frame_info_csvfile, index_col=0)
-    # frames_info_file = frames_info_file[frames_info_file.Split == "TEST"]
 
     evaluator = ObjectDetectEvaluator(dataset=ds.testset, tasks=["bxs"], output_dir=out_directory)
     
@@ -66,7 +64,6 @@ def eval_trained_model(model: torch.nn.Module, cfg: CfgNode, ds: datas,
     evaluator.evaluate()
     evaluator.plot(num_examples_to_plot=min(num_examples_to_plot, len(test_outputs)))
     print(" ** test MAP: {}".format(test_loss))
-    # compute_stats(total_filenames, total_output_guiding, total_gt_guiding, textfilename=textfilename)
 
 def eval_sliding_window(model:torch.nn.Module, cfg: CfgNode, ds: datas, device: torch.device, basedir: str, basename: str,):
     g = ds.testset
@@ -74,7 +71,6 @@ def eval_sliding_window(model:torch.nn.Module, cfg: CfgNode, ds: datas, device: 
     frame_step = 2
     predictions = dict()
 
-    # !!!
     model.eval()
 
     for case_index in range(len(g)):
